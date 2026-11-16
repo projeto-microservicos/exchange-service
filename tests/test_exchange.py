@@ -16,10 +16,16 @@ def client(handler):
     return TestClient(create_app(httpx.MockTransport(handler)))
 
 
-def test_quote_has_authenticated_identity_and_bid_ask():
+def test_quote_has_authenticated_identity_and_bid_ask(ptax):
     def provider(request):
-        assert request.url.path == "/json/last/USD-BRL"
-        return httpx.Response(200, json={"USDBRL": {"ask": "5.20", "bid": "5.10", "create_date": "2026-11-11 12:00:00"}})
+        assert request.url.path.endswith("/odata/CotacaoMoedaPeriodo(moeda=@moeda,dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)")
+        assert request.url.params["@moeda"] == "'USD'"
+        assert request.url.params["@dataInicial"] == "'11-06-2026'"
+        assert request.url.params["@dataFinalCotacao"] == "'11-16-2026'"
+        assert request.url.params["$filter"] == "tipoBoletim eq 'Fechamento'"
+        assert request.url.params["$orderby"] == "dataHoraCotacao desc"
+        assert b"+" not in request.url.query
+        return httpx.Response(200, json=ptax())
     account = str(uuid4())
     with client(provider) as c:
         r = c.get("/exchanges/USD/BRL", headers={"id-account": account})
@@ -27,21 +33,23 @@ def test_quote_has_authenticated_identity_and_bid_ask():
         assert r.json() == {"sell": 5.2, "buy": 5.1, "date": "2026-11-11 12:00:00", "id-account": account}
 
 
-def test_reverse_pair_and_same_currency():
+def test_reverse_pair_and_same_currency(ptax):
+    calls = []
     def provider(request):
-        if request.url.path.endswith("BRL-USD"):
-            return httpx.Response(404)
-        return httpx.Response(200, json={"USDBRL": {"ask": "5", "bid": "4", "create_date": "2026-11-11 12:00:00"}})
+        calls.append(request)
+        assert request.url.params["@moeda"] == "'USD'"
+        return httpx.Response(200, json=ptax("5", "4"))
     with client(provider) as c:
         headers = {"id-account": str(uuid4())}
         assert c.get("/exchanges/BRL/USD", headers=headers).json()["sell"] == 0.25
         assert c.get("/exchanges/USD/USD", headers=headers).json()["buy"] == 1
         assert c.get("/exchanges/XXX/XXX", headers=headers).status_code == 422
         assert c.get("/exchanges/USD/BRL").status_code == 422
+        assert len(calls) == 1
 
 
-@pytest.mark.parametrize("status,payload,expected", [(404, {}, 422), (429, {}, 503), (500, {}, 503),
-    (200, {"USDBRL": {"ask": "NaN", "bid": "1", "create_date": "x"}}, 503), (200, {}, 503)])
+@pytest.mark.parametrize("status,payload,expected", [(404, {}, 503), (429, {}, 503), (500, {}, 503),
+    (200, {"value": []}, 503), (200, {"value": None}, 503), (200, {}, 503)])
 def test_provider_failure_is_not_a_fake_quote(status, payload, expected):
     with client(lambda r: httpx.Response(status, json=payload)) as c:
         assert c.get("/exchanges/USD/BRL", headers={"id-account": str(uuid4())}).status_code == expected
@@ -54,11 +62,11 @@ def test_timeout():
         assert c.get("/exchanges/USD/BRL", headers={"id-account": str(uuid4())}).status_code == 503
 
 
-def test_cached_quote_never_reuses_another_accounts_identity():
+def test_cached_quote_never_reuses_another_accounts_identity(ptax):
     calls = []
     def provider(request):
         calls.append(request)
-        return httpx.Response(200, json={"USDBRL": {"ask": "5.20", "bid": "5.10", "create_date": "2026-11-11 12:00:00"}})
+        return httpx.Response(200, json=ptax())
     class Cache:
         data = {}
         async def hgetall(self, key): return self.data.get(key, {})
@@ -80,12 +88,12 @@ def test_cached_quote_never_reuses_another_accounts_identity():
         assert len(calls) == 1
 
 
-def test_redis_failure_falls_back_to_provider():
+def test_redis_failure_falls_back_to_provider(ptax):
     from redis.exceptions import RedisError
     class BrokenCache:
         async def hgetall(self, key): raise RedisError("unavailable")
         def pipeline(self, transaction): raise RedisError("unavailable")
         async def aclose(self): pass
-    with client(lambda r: httpx.Response(200, json={"USDBRL": {"ask": "5", "bid": "4", "create_date": "2026-11-11 12:00:00"}})) as c:
+    with client(lambda r: httpx.Response(200, json=ptax("5", "4"))) as c:
         c.app.state.cache = BrokenCache()
         assert c.get("/exchanges/USD/BRL", headers={"id-account": str(uuid4())}).status_code == 200

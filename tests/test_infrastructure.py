@@ -19,12 +19,11 @@ pytestmark = [pytest.mark.integration, pytest.mark.skipif(
 )]
 
 
-def test_real_cache_expiry_identity_isolation_and_confirmed_event():
+def test_real_cache_expiry_identity_isolation_and_confirmed_event(ptax):
     calls = []
     def provider(request):
         calls.append(request)
-        return httpx.Response(200, json={"USDBRL": {
-            "ask": "5.2", "bid": "5.1", "create_date": "2026-11-16 12:00:00"}})
+        return httpx.Response(200, json=ptax("5.2", "5.1", "2026-11-16 12:00:00"))
     settings = Settings(cache_enabled=True, redis_url=os.environ["EXCHANGE_TEST_REDIS_URL"], cache_ttl=1,
                         messaging_enabled=True, rabbitmq_url=os.environ["EXCHANGE_TEST_RABBITMQ_URL"])
     with TestClient(create_app(httpx.MockTransport(provider), settings=settings)) as client:
@@ -36,8 +35,8 @@ def test_real_cache_expiry_identity_isolation_and_confirmed_event():
         assert second.json()["id-account"] == bob
         assert len(calls) == 1
         async def inspect():
-            assert await client.app.state.cache.ttl("exchange:v1:USD:BRL") >= 0
-            assert set(await client.app.state.cache.hgetall("exchange:v1:USD:BRL")) == {"sell", "buy", "date"}
+            assert await client.app.state.cache.ttl("exchange:ptax:v1:USD:BRL") >= 0
+            assert set(await client.app.state.cache.hgetall("exchange:ptax:v1:USD:BRL")) == {"sell", "buy", "date"}
             await asyncio.wait_for(client.app.state.events.queue.join(), timeout=10)
             connection = await aio_pika.connect(settings.rabbitmq_url)
             async with connection:

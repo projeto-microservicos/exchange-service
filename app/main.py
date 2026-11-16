@@ -1,10 +1,9 @@
-"""Exchange API behind the gateway: AwesomeAPI quotes without invented rates."""
+"""Exchange API behind the gateway, using BACEN/PTAX directly."""
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 import logging
-import math
 import time
 from typing import Annotated
 from uuid import UUID
@@ -16,29 +15,13 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from app.config import Settings
+from app.bacen import CURRENCIES, fetch_quote, validate_quote
 from app.messaging import QuoteEvents
 from app.models import ExchangeQuote
 from app.metrics import CACHE_REQUESTS, LATENCY, PROVIDER_CALLS, PROVIDER_LATENCY, REQUESTS
 
 logger = logging.getLogger(__name__)
-CURRENCIES = frozenset("USD BRL EUR GBP JPY CAD AUD CHF CNY INR SEK NOK DKK NZD MXN ARS ZAR CLP COP PEN UYU TRY HKD SGD ILS PLN RUB".split())
 Currency = Annotated[str, Path(pattern=r"^[A-Za-z]{3}$")]
-
-
-def validate_quote(raw: dict) -> dict:
-    try:
-        if isinstance(raw["sell"], bool) or isinstance(raw["buy"], bool):
-            raise ValueError("Rates cannot be booleans")
-        sell, buy = Decimal(raw["sell"]), Decimal(raw["buy"])
-        if not all(rate.is_finite() and rate > 0 and math.isfinite(float(rate)) and float(rate) > 0 for rate in (sell, buy)) or sell < buy:
-            raise ValueError("Invalid bid/ask rates")
-        date = raw["date"]
-        if not isinstance(date, str):
-            raise ValueError("Invalid date")
-        datetime.fromisoformat(date)
-        return {"sell": sell, "buy": buy, "date": date}
-    except (InvalidOperation, ValueError, KeyError, TypeError, OverflowError) as error:
-        raise HTTPException(503, "Invalid exchange provider response") from error
 
 
 def create_app(transport: httpx.AsyncBaseTransport | None = None, *, settings: Settings | None = None) -> FastAPI:
@@ -47,7 +30,7 @@ def create_app(transport: httpx.AsyncBaseTransport | None = None, *, settings: S
     @asynccontextmanager
     async def lifespan(app):
         async with httpx.AsyncClient(
-            base_url=settings.provider_url, timeout=httpx.Timeout(settings.provider_timeout, connect=1, pool=0.25),
+            base_url=settings.provider_url.rstrip("/") + "/", timeout=httpx.Timeout(settings.provider_timeout, connect=1, pool=0.25),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             transport=transport, headers={"User-Agent": "InsperStore-Exchange/1.0"},
         ) as client:
@@ -108,20 +91,7 @@ def create_app(transport: httpx.AsyncBaseTransport | None = None, *, settings: S
         started = time.monotonic()
         try:
             async with asyncio.timeout(settings.provider_timeout):
-                response = await app.state.client.get(f"/json/last/{source}-{target}")
-                PROVIDER_CALLS.labels(str(response.status_code)).inc()
-                inverse = response.status_code in (400, 404)
-                if inverse:
-                    response = await app.state.client.get(f"/json/last/{target}-{source}")
-                    PROVIDER_CALLS.labels(str(response.status_code)).inc()
-                    if response.status_code in (400, 404):
-                        raise HTTPException(422, "Currency pair not supported")
-                response.raise_for_status()
-                raw = response.json()[(target + source) if inverse else (source + target)]
-                result = validate_quote({"sell": raw["ask"], "buy": raw["bid"], "date": raw["create_date"]})
-                if inverse:
-                    result = validate_quote({"sell": Decimal(1) / result["buy"],
-                                             "buy": Decimal(1) / result["sell"], "date": result["date"]})
+                result = await fetch_quote(app.state.client, source, target)
         except HTTPException:
             raise
         except (httpx.HTTPError, TimeoutError, ValueError, KeyError, TypeError, ArithmeticError) as error:
@@ -139,7 +109,7 @@ def create_app(transport: httpx.AsyncBaseTransport | None = None, *, settings: S
         if cache is None:
             CACHE_REQUESTS.labels("disabled").inc()
             return await fetch(source, target)
-        key = f"exchange:v1:{source}:{target}"
+        key = f"exchange:ptax:v1:{source}:{target}"
         # The allowlist bounds the lock map. Recheck inside the lock to prevent cache stampedes.
         async with locks.setdefault((source, target), asyncio.Lock()):
             hit = await cached(key)

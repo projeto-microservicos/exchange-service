@@ -56,6 +56,8 @@ O manifesto padrão mantém uma réplica e cache/mensageria explicitamente desli
 
 O processo precisa de saída HTTPS para o provedor, DNS e certificados válidos. Não precisa de PostgreSQL/RDS. Configuração de rede, quotas, orçamento e provisionamento ficam fora do script de release.
 
+O provedor é o BACEN/PTAX: `EXCHANGE_PROVIDER_URL=https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/`. Um ConfigMap já existente com o endereço da AwesomeAPI precisa ser atualizado separadamente do release. Em 16/11/2026 foi confirmada resposta válida da PTAX a uma consulta HTTPS executada a partir do pod auth já existente no EKS `eks-store`; essa verificação não implantou exchange nem criou recursos. Repita a validação na rede real do serviço ao fazer o deploy.
+
 ## Ativar e diagnosticar
 
 Primeiro execute manualmente em `main` com `deploy` desmarcado. Com ECR, IAM, rede, ConfigMap e acesso EKS prontos, faça um deploy manual. Habilite `RELEASE_ENABLED`/`DEPLOY_ENABLED` somente se desejar automação contínua.

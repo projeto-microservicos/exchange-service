@@ -14,7 +14,7 @@ def boolean(name: str, default: str = "false") -> bool:
 
 @dataclass(frozen=True)
 class Settings:
-    provider_url: str = "https://economia.awesomeapi.com.br"
+    provider_url: str = "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/"
     provider_timeout: float = 3.0
     cache_enabled: bool = False
     redis_url: str = "redis://localhost:6379/1"

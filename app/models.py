@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 
 class ExchangeQuote(BaseModel):
-    sell: float = Field(gt=0, allow_inf_nan=False, description="Provider ask, or 1/bid of the inverse pair")
-    buy: float = Field(gt=0, allow_inf_nan=False, description="Provider bid, or 1/ask of the inverse pair")
+    sell: float = Field(gt=0, allow_inf_nan=False, description="PTAX source sell / target buy, using BRL as reference")
+    buy: float = Field(gt=0, allow_inf_nan=False, description="PTAX source buy / target sell, using BRL as reference")
     date: str
     account: UUID = Field(alias="id-account")

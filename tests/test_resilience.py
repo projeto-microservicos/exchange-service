@@ -20,21 +20,20 @@ HEADERS = {"id-account": "00000000-0000-0000-0000-000000000001"}
     ("1e999", "1", QUOTE["date"]), ("1e-999", "1e-1000", QUOTE["date"]),
     (True, True, QUOTE["date"]), ("2", "1", None), ("2", "1", "invalid-date"),
 ])
-def test_invalid_provider_data_returns_service_unavailable(ask, bid, date):
-    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={
-        "USDBRL": {"ask": ask, "bid": bid, "create_date": date}}))
+def test_invalid_provider_data_returns_service_unavailable(ask, bid, date, ptax):
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json=ptax(ask, bid, date)))
     with TestClient(create_app(transport, settings=Settings())) as client:
         assert client.get("/exchanges/USD/BRL", headers=HEADERS).status_code == 503
 
 
-def test_total_provider_budget_bounds_an_inverted_lookup():
+def test_total_provider_budget_bounds_parallel_currency_lookups(ptax):
     async def provider(request):
-        if request.url.path.endswith("BRL-USD"):
-            return httpx.Response(404)
+        if request.url.params["@moeda"] == "'USD'":
+            return httpx.Response(200, json=ptax())
         await asyncio.sleep(0.1)
-        return httpx.Response(200, json={})
+        return httpx.Response(200, json=ptax())
     with TestClient(create_app(httpx.MockTransport(provider), settings=Settings(provider_timeout=0.02))) as client:
-        assert client.get("/exchanges/BRL/USD", headers=HEADERS).status_code == 503
+        assert client.get("/exchanges/EUR/USD", headers=HEADERS).status_code == 503
 
 
 def test_disabled_flags_never_initialize_optional_dependencies(monkeypatch):
@@ -48,7 +47,7 @@ def test_disabled_flags_never_initialize_optional_dependencies(monkeypatch):
         assert client.get("/exchanges/USD/BRL", headers={"id-account": "invalid"}).status_code == 422
 
 
-def test_corrupted_cache_is_replaced_without_reusing_identity():
+def test_corrupted_cache_is_replaced_without_reusing_identity(ptax):
     class Cache:
         data = {"sell": "NaN", "buy": "1", "date": QUOTE["date"], "id-account": str(uuid4())}
         async def hgetall(self, key): return self.data
@@ -59,8 +58,7 @@ def test_corrupted_cache_is_replaced_without_reusing_identity():
         def expire(self, key, seconds): assert seconds == 60
         async def execute(self): pass
         async def aclose(self): pass
-    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={
-        "USDBRL": {"ask": "5.2", "bid": "5.1", "create_date": QUOTE["date"]}}))
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json=ptax("5.2", "5.1", QUOTE["date"])))
     with TestClient(create_app(transport, settings=Settings())) as client:
         client.app.state.cache = cache = Cache()
         result = client.get("/exchanges/USD/BRL", headers=HEADERS)

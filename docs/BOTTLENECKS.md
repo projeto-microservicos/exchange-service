@@ -12,13 +12,13 @@ Referência: [Bottlenecks — Insper 2026.2](https://insper.github.io/platform/2
 
 ## Cache e limite do provedor
 
-`CACHE_ENABLED=true` habilita Redis com `EXCHANGE_CACHE_TTL=60`. A chave `exchange:v1:{source}:{target}` contém apenas `sell`, `buy` e `date`. A identidade da conta nunca é persistida no cache. Pares inválidos, erros e taxas inválidas não são cacheados.
+`CACHE_ENABLED=true` habilita Redis com `EXCHANGE_CACHE_TTL=60`. A chave `exchange:ptax:v1:{source}:{target}` contém apenas `sell`, `buy` e `date`. A namespace separada impede reaproveitar cotações do provedor anterior. A identidade da conta nunca é persistida no cache. Pares inválidos, erros e taxas inválidas não são cacheados.
 
 Cada processo serializa cache misses para o mesmo par e reconsulta o cache dentro do lock. Isso reduz chamadas duplicadas dentro de uma réplica; não é um lock distribuído entre réplicas. A allowlist de moedas limita o número de locks possíveis.
 
 As escritas Redis usam transação para associar cotação e TTL. Timeouts de cache são de 200 ms; falhas de conexão/leitura/escrita preservam a consulta ao provedor. Não há fallback para cotações inventadas ou cache expirado. Moedas iguais retornam a identidade matemática sem consultar dependências.
 
-O cliente HTTP reutiliza conexões, limita o pool a 20 conexões e tem um orçamento total padrão de três segundos para as tentativas direta/inversa. Não faz tentativas ilimitadas em respostas 429. O provedor pode manter seu próprio cache e impor limites: [documentação da AwesomeAPI](https://docs.awesomeapi.com.br/api-de-moedas).
+O cliente HTTP reutiliza conexões, limita o pool a 20 conexões e tem um orçamento total padrão de três segundos para todas as consultas ao BACEN. Um par com BRL exige uma consulta; os demais exigem duas em paralelo e a mesma data de fechamento. Não há tentativas ilimitadas em respostas 429. A busca cobre dez dias corridos e usa apenas fechamentos, preservando a data do boletim. A fonte não é um feed de mercado em tempo real: [documentação do BACEN/PTAX](https://www.bcb.gov.br/conteudo/dadosabertos/BCBDepin/gnastportal-dados-abertostaxas-de-cambio---todos-os-boletins-diarios.pdf).
 
 ## Eventos de cotação
 
@@ -46,6 +46,6 @@ Cache/mensageria permanecem explicitamente desligados no Deployment, mesmo com C
 
 ## Verificação
 
-Os testes cobrem bid/ask, inversão, moedas iguais, identidade, timeout total, rate limit, dados inválidos, fallback de cache, retries e descarte de eventos. `scripts/test-infrastructure.sh` verifica cache/TTL com duas contas e confirmação de uma mensagem em Redis/RabbitMQ reais e descartáveis.
+Os testes cobrem compra/venda PTAX, inversão, pares cruzados na mesma data, fechamento anterior em dia sem publicação, moedas iguais, identidade, timeout total, rate limit, dados inválidos, fallback de cache, retries e descarte de eventos. `scripts/test-infrastructure.sh` verifica cache/TTL com duas contas e confirmação de uma mensagem em Redis/RabbitMQ reais e descartáveis.
 
 O scan deve produzir um inventário completo em `artifacts/vulnerabilities.json`; advisories e falhas de ferramenta bloqueiam o release. Esse resultado cobre bibliotecas Python, não substitui o scanning de imagem/sistema operacional nem uma avaliação de configuração da conta AWS.
