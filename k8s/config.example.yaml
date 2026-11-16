@@ -1,0 +1,14 @@
+# Copy to config.local.yaml and set real endpoints before applying.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: exchange-config
+data:
+  CACHE_ENABLED: 'false'
+  MESSAGING_ENABLED: 'false'
+  EXCHANGE_PROVIDER_URL: https://economia.awesomeapi.com.br
+  EXCHANGE_PROVIDER_TIMEOUT: '3'
+  REDIS_URL: redis://exchange-cache:6379/1
+  # RabbitMQ credentials belong in exchange-secrets when messaging is enabled.
+  EXCHANGE_CACHE_TTL: '60'
+  EXCHANGE_EVENT_QUEUE_SIZE: '256'

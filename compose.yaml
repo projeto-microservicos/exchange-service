@@ -1,0 +1,74 @@
+name: store-exchange
+services:
+  exchange:
+    build: .
+    ports:
+    - 127.0.0.1:${HTTP_PORT:-8083}:8080
+    environment:
+      CACHE_ENABLED: ${CACHE_ENABLED:-false}
+      REDIS_URL: redis://exchange-cache:6379/1
+      EXCHANGE_CACHE_TTL: ${EXCHANGE_CACHE_TTL:-60}
+      MESSAGING_ENABLED: ${MESSAGING_ENABLED:-false}
+      RABBITMQ_URL: amqp://store:${RABBITMQ_PASSWORD:?Run python scripts/init-env.py}@exchange-rabbit:5672/
+      EXCHANGE_PROVIDER_URL: ${EXCHANGE_PROVIDER_URL:-https://economia.awesomeapi.com.br}
+      EXCHANGE_PROVIDER_TIMEOUT: ${EXCHANGE_PROVIDER_TIMEOUT:-3}
+    networks: [backend, services]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8080/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+  exchange-cache:
+    image: redis:8.2-alpine
+    profiles: [cache]
+    command: [redis-server, --maxmemory, 96mb, --maxmemory-policy, allkeys-lru]
+    networks: [backend]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  exchange-rabbit:
+    image: rabbitmq:4.2-management-alpine
+    profiles: [messaging]
+    environment:
+      RABBITMQ_DEFAULT_USER: store
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Run python scripts/init-env.py}
+    networks: [backend]
+    volumes: [rabbit-data:/var/lib/rabbitmq]
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    profiles: [monitoring]
+    ports: ["127.0.0.1:${PROMETHEUS_PORT:-9092}:9090"]
+    networks: [backend]
+    volumes:
+    - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    - prometheus-data:/prometheus
+    command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.retention.time=7d]
+  grafana:
+    image: grafana/grafana:13.3.1
+    profiles: [monitoring]
+    ports: ["127.0.0.1:${GRAFANA_PORT:-3001}:3000"]
+    networks: [backend]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Run python scripts/init-env.py}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+    - grafana-data:/var/lib/grafana
+    - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+networks:
+  backend: {}
+  services:
+    name: store-dev
+    external: true
+volumes:
+  rabbit-data: {}
+  prometheus-data: {}
+  grafana-data: {}
