@@ -8,7 +8,7 @@ Referência: [Bottlenecks — Insper 2026.2](https://insper.github.io/platform/2
 | Observabilidade | Prometheus, métricas de requisições/provedor/cache/eventos e dashboard Grafana provisionado | Perfil `monitoring` local; integrar ao monitoramento existente no EKS |
 | Mensageria | Eventos `QuoteFetched` em worker assíncrono com fila limitada e confirmação do RabbitMQ | Opcional localmente; desligada no EKS |
 | Balanceamento | Service ClusterIP, probes e manifesto HPA opcional | Uma réplica no cluster atual |
-| Vulnerabilidades | Lock transitivo de runtime e pip-audit antes de publicar | Obrigatório no Jenkins e no GitHub Actions |
+| Vulnerabilidades | Lock transitivo de runtime e pip-audit antes de publicar | Obrigatório no GitHub Actions |
 
 ## Cache e limite do provedor
 
@@ -34,7 +34,7 @@ O worker usa publisher confirms, publicação obrigatoriamente roteada e até tr
 
 O dashboard provisionado mostra vazão, p95, proporção 5xx, cache hit ratio, chamadas ao provedor, resultados de publicação, fila interna e memória do processo. Labels não incluem UUIDs, URLs completas ou caminhos arbitrários. Health checks e scrapes não entram na latência HTTP da API.
 
-`/health` e `/ready` verificam a disponibilidade do processo; não chamam o provedor. Falhas externas aparecem nas respostas e métricas, sem provocar reinícios de todos os Pods. Redis e RabbitMQ opcionais não bloqueiam readiness.
+`/exchange/health-check` (startup e liveness), `/ready` (readiness) e `/health` verificam a disponibilidade do processo; não chamam o provedor. Falhas externas aparecem nas respostas e métricas, sem provocar reinícios de todos os Pods. Redis e RabbitMQ opcionais não bloqueiam readiness.
 
 Para evidenciar ganho, compare a mesma carga com cache ligado/desligado e registre chamadas externas, latência p95 e erros. Os testes funcionais comprovam comportamento, não um ganho de desempenho medido.
 

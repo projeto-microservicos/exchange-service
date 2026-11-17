@@ -23,6 +23,8 @@ from app.metrics import CACHE_REQUESTS, LATENCY, PROVIDER_CALLS, PROVIDER_LATENC
 logger = logging.getLogger(__name__)
 CURRENCIES = frozenset("USD BRL EUR GBP JPY CAD AUD CHF CNY INR SEK NOK DKK NZD MXN ARS ZAR CLP COP PEN UYU TRY HKD SGD ILS PLN RUB".split())
 Currency = Annotated[str, Path(pattern=r"^[A-Za-z]{3}$")]
+DATE_FORMAT = "%Y-%m-%d %H:%M:%S"  # exchange.md example: "2021-09-01 14:23:42"
+OPERATIONS = frozenset({"/health", "/ready", "/metrics", "/exchange/health-check"})
 
 
 def validate_quote(raw: dict) -> dict:
@@ -70,9 +72,10 @@ def create_app(transport: httpx.AsyncBaseTransport | None = None, *, settings: S
 
     @app.middleware("http")
     async def metrics(request, call_next):
-        if request.url.path in {"/health", "/ready", "/metrics"}:
+        if request.url.path in OPERATIONS:
             return await call_next(request)
-        endpoint = "exchanges" if request.url.path.startswith("/exchanges/") else "other"
+        # Singular and plural paths share one label, so dashboards keep a single series.
+        endpoint = "exchanges" if request.url.path.startswith(("/exchanges/", "/exchange/")) else "other"
         started, status = time.monotonic(), 500
         try:
             response = await call_next(request)
@@ -86,6 +89,11 @@ def create_app(transport: httpx.AsyncBaseTransport | None = None, *, settings: S
     @app.get("/ready", tags=["operations"])
     async def health():
         return {"status": "UP"}
+
+    @app.get("/exchange/health-check", tags=["operations"], status_code=200, response_class=Response)
+    async def health_check():
+        """Overview.md: 200 with nothing internal while the service is up; the probes call it."""
+        return Response(status_code=200)
 
     @app.get("/metrics", include_in_schema=False)
     async def prometheus():
@@ -155,12 +163,15 @@ def create_app(transport: httpx.AsyncBaseTransport | None = None, *, settings: S
                 logger.warning("Could not cache exchange quote")
             return result
 
+    # exchange.md declares /exchanges/{from}/{to}; its example (and the BACEN page) use /exchange/USD/EUR.
     @app.get("/exchanges/{source}/{target}", tags=["exchange"], response_model=ExchangeQuote)
+    @app.get("/exchange/{source}/{target}", tags=["exchange"], response_model=ExchangeQuote)
     async def exchange(source: Currency, target: Currency, account: Annotated[UUID, Header(alias="id-account")]):
         source, target = source.upper(), target.upper()
         if source not in CURRENCIES or target not in CURRENCIES:
             raise HTTPException(422, "Currency not supported")
-        result = {"sell": Decimal(1), "buy": Decimal(1), "date": datetime.now(timezone.utc).isoformat()} if source == target else await quote(source, target)
+        same = {"sell": Decimal(1), "buy": Decimal(1), "date": datetime.now(timezone.utc).strftime(DATE_FORMAT)}
+        result = same if source == target else await quote(source, target)
         return {"sell": float(result["sell"]), "buy": float(result["buy"]), "date": result["date"], "id-account": str(account)}
 
     return app

@@ -89,3 +89,31 @@ def test_redis_failure_falls_back_to_provider():
     with client(lambda r: httpx.Response(200, json={"USDBRL": {"ask": "5", "bid": "4", "create_date": "2026-11-11 12:00:00"}})) as c:
         c.app.state.cache = BrokenCache()
         assert c.get("/exchanges/USD/BRL", headers={"id-account": str(uuid4())}).status_code == 200
+
+
+def test_health_check_needs_no_identity_and_returns_nothing_internal():
+    def provider(request):
+        raise AssertionError("health-check must not call the provider")
+    with client(provider) as c:
+        r = c.get("/exchange/health-check")
+        assert r.status_code == 200
+        assert r.content == b""
+
+
+def test_singular_path_answers_like_the_plural_one():
+    def provider(request):
+        return httpx.Response(200, json={"USDEUR": {"ask": "0.82", "bid": "0.80", "create_date": "2026-11-17 14:23:42"}})
+    account = str(uuid4())
+    with client(provider) as c:
+        singular = c.get("/exchange/USD/EUR", headers={"id-account": account})
+        plural = c.get("/exchanges/USD/EUR", headers={"id-account": account})
+        assert singular.status_code == plural.status_code == 200
+        assert singular.json() == plural.json() == {"sell": 0.82, "buy": 0.8, "date": "2026-11-17 14:23:42", "id-account": account}
+        assert c.get("/exchange/USD/EUR").status_code == 422
+
+
+def test_same_currency_date_uses_the_statement_format():
+    import re
+    with client(lambda r: httpx.Response(500)) as c:
+        date = c.get("/exchange/BRL/BRL", headers={"id-account": str(uuid4())}).json()["date"]
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", date)

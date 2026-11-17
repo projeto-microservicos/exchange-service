@@ -14,7 +14,7 @@ services:
       EXCHANGE_PROVIDER_TIMEOUT: ${EXCHANGE_PROVIDER_TIMEOUT:-3}
     networks: [backend, services]
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8080/ready')"]
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8080/exchange/health-check')"]
       interval: 10s
       timeout: 5s
       retries: 20

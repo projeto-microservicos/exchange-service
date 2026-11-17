@@ -36,11 +36,11 @@ Para cluster que já usa access entries, o administrador associa a role ao grupo
 
 ```bash
 aws eks create-access-entry --region "$AWS_REGION" --cluster-name "$EKS_CLUSTER_NAME" \
-  --principal-arn "$AWS_ROLE_ARN" --type STANDARD --kubernetes-groups github-actions-exchange
+  --principal-arn "$AWS_ROLE_ARN" --type STANDARD --kubernetes-groups github-deployer
 kubectl -n "$K8S_NAMESPACE" apply -f k8s/github-actions-rbac.yaml
 ```
 
-Se a entry existir, preserve outros grupos ao atualizá-la. Não altere automaticamente o modo de autenticação do cluster. As roles dos nós também precisam de permissão de pull do ECR. O runner precisa alcançar o endpoint Kubernetes; endpoint privado exige conectividade à VPC, além de OIDC.
+No `eks-store`, a role `github-actions-deployer` já tem essa entry com o grupo `github-deployer`, compartilhado pelos 6 serviços; basta aplicar o RBAC. Se a entry existir, preserve outros grupos ao atualizá-la. Não altere automaticamente o modo de autenticação do cluster. As roles dos nós também precisam de permissão de pull do ECR. O runner precisa alcançar o endpoint Kubernetes; endpoint privado exige conectividade à VPC, além de OIDC.
 
 ## Configuração inicial
 
@@ -64,4 +64,4 @@ O script verifica conta AWS, ECR e ConfigMap antes de construir a imagem; no dep
 
 Artefatos: `pytest.xml`, `infrastructure.xml`, `vulnerabilities.json`, `release.json` e `deployment.yaml`. Os dois últimos registram imagem, digest, commit e estado do deploy, sem valores de Secrets. Docker config e kubeconfig temporários são removidos ao encerrar.
 
-Os testes offline dos scripts validam sucesso e falhas sem AWS. Eles não comprovam as permissões ou conectividade da conta real. Configure somente o mecanismo de release escolhido; [Jenkins](JENKINS-EKS.md) é a alternativa solicitada para o exercício.
+Os testes offline dos scripts validam sucesso e falhas sem AWS. Eles não comprovam as permissões ou conectividade da conta real.

@@ -9,6 +9,8 @@ GET /exchanges/USD/BRL
 id-account: 00000000-0000-0000-0000-000000000001
 ```
 
+`GET /exchange/USD/BRL` (singular) responde igual: o enunciado declara `/exchanges/{from}/{to}`, mas o exemplo dele e a página BACEN usam `/exchange/...`. O gateway roteia os dois prefixos.
+
 ```json
 {
   "sell": 5.2,
@@ -18,7 +20,7 @@ id-account: 00000000-0000-0000-0000-000000000001
 }
 ```
 
-Os valores acima são ilustrativos; a execução usa o provedor real. `sell=ask` e `buy=bid`. Quando só existe o par inverso, `sell=1/bid` e `buy=1/ask`. Moedas iguais e suportadas retornam 1. Nomes de moedas aceitam letras maiúsculas/minúsculas e passam por uma allowlist explícita.
+Os valores acima são ilustrativos; a execução usa o provedor real. `sell=ask` e `buy=bid`. Quando só existe o par inverso, `sell=1/bid` e `buy=1/ask`. Moedas iguais e suportadas retornam 1, com `date` no formato do enunciado (`2026-11-17 14:23:42`, UTC). Nomes de moedas aceitam letras maiúsculas/minúsculas e passam por uma allowlist explícita.
 
 | Situação | HTTP |
 |---|---|
@@ -28,7 +30,7 @@ Os valores acima são ilustrativos; a execução usa o provedor real. `sell=ask`
 
 O gateway valida o token e sobrescreve `id-account` com o UUID autenticado. A API interna exige esse UUID, mas não emite tokens. O order chama `http://exchange:8080/exchanges/USD/{currency}` com o mesmo header. O caminho plural `/exchanges` segue o endpoint declarado no exercício e o contrato da equipe.
 
-OpenAPI/Swagger: `/docs`; schema: `/openapi.json`; liveness: `/health`; readiness: `/ready`; Prometheus: `/metrics`. Esses endpoints operacionais ficam na rede interna; a rota pública do gateway deve expor somente a API acordada.
+Health-check: `GET /exchange/health-check` responde 200 sem corpo e sem exigir `id-account`; as probes de startup e liveness chamam esse endpoint. Ele é chamado direto no serviço, não pelo gateway. OpenAPI/Swagger: `/docs`; schema: `/openapi.json`; readiness: `/ready`; `/health` (legado); Prometheus: `/metrics`. Esses endpoints operacionais ficam na rede interna; a rota pública do gateway deve expor somente a API acordada.
 
 ## Executar e testar
 
@@ -86,9 +88,9 @@ O timeout padrão e as conexões limitadas protegem a capacidade do serviço. O 
 
 ## AWS e CI/CD
 
-[GitHub Actions](.github/workflows/ci-cd.yml) executa testes, audit, build, integração Redis/RabbitMQ e validação de Compose. Publica no ECR com OIDC e faz deploy por digest somente após configurar o ambiente e habilitar o release. O [Jenkinsfile](Jenkinsfile) é uma alternativa completa para o exercício, usando o mesmo script de release.
+[GitHub Actions](.github/workflows/ci-cd.yml) executa testes, audit, build, integração Redis/RabbitMQ e validação de Compose. Publica no ECR com OIDC e faz deploy por digest somente após configurar o ambiente e habilitar o release.
 
-Veja [o guia AWS/EKS](docs/DEPLOYMENT.md) e [o guia Jenkins](docs/JENKINS-EKS.md). Escolha um mecanismo para releases automáticos, evitando dois pipelines publicando simultaneamente no mesmo workload.
+A equipe escolheu o GitHub Actions para todos os serviços. O caminho alternativo por Jenkins foi removido em 17/11 porque não havia Jenkins rodando, e manter dois pipelines publicando no mesmo workload criaria risco de releases concorrentes. Veja [o guia AWS/EKS](docs/DEPLOYMENT.md).
 
 O manifesto atual usa **uma réplica**, `CACHE_ENABLED=false` e `MESSAGING_ENABLED=false`. Não cria Redis, RabbitMQ, RDS, ElastiCache, Amazon MQ ou um cluster. Atualizações sem Pod extra podem causar indisponibilidade breve. HPA e réplicas adicionais ficam para quando houver capacidade aprovada.
 
@@ -100,3 +102,5 @@ cd exchange-service
 ```
 
 O agregador `projeto-microservicos/produto` pode fixar este repositório como submodule. Os builds continuam independentes. O serviço segue os exercícios [Exchange](https://insper.github.io/platform/2026.2/exercises/exchange/) e [Bottlenecks](https://insper.github.io/platform/2026.2/exercises/bottlenecks/) e as convenções do projeto da equipe. Houve assistência de IA na implementação, nos testes e na infraestrutura; registre as contribuições reais e observe as regras de divulgação da disciplina.
+
+Autoria: o serviço foi implementado por `adventurescumm` até 16/11. Ele saiu do projeto em 17/11, e o João (`joaorcmr`) assumiu o repositório. Na mesma data, o agente do João (Claude) acrescentou o `GET /exchange/health-check`, a rota no singular, o formato de `date` para moedas iguais e as probes no health-check, corrigiu o grupo do RBAC (`github-deployer`) e removeu o caminho Jenkins. O João revisou e commitou essas mudanças.
