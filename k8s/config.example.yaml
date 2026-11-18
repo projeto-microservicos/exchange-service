@@ -6,7 +6,10 @@ metadata:
 data:
   CACHE_ENABLED: 'false'
   MESSAGING_ENABLED: 'false'
-  EXCHANGE_PROVIDER_URL: https://economia.awesomeapi.com.br
+  # PTAX (BCB): public, no key, answers from AWS (AwesomeAPI gives 429 there).
+  EXCHANGE_PROVIDER_URL: https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata
+  EXCHANGE_RATE_TTL: '300'
+  EXCHANGE_RATE_RETRY: '30'
   EXCHANGE_PROVIDER_TIMEOUT: '3'
   REDIS_URL: redis://exchange-cache:6379/1
   # RabbitMQ credentials belong in exchange-secrets when messaging is enabled.

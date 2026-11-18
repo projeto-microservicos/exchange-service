@@ -12,27 +12,24 @@ from app.messaging import QuoteEvents
 
 QUOTE = {"sell": Decimal("5.2"), "buy": Decimal("5.1"), "date": "2026-11-16 12:00:00"}
 HEADERS = {"id-account": "00000000-0000-0000-0000-000000000001"}
+DATE = "2026-11-17 13:07:26.01516"
 
 
-@pytest.mark.parametrize("ask,bid,date", [
-    ("0", "0", QUOTE["date"]), ("-1", "-2", QUOTE["date"]),
-    ("1", "2", QUOTE["date"]), ("Infinity", "1", QUOTE["date"]),
-    ("1e999", "1", QUOTE["date"]), ("1e-999", "1e-1000", QUOTE["date"]),
-    (True, True, QUOTE["date"]), ("2", "1", None), ("2", "1", "invalid-date"),
+@pytest.mark.parametrize("buy,sell,date", [
+    (0, 0, DATE), (-2, -1, DATE), (2, 1, DATE), ("Infinity", 1, DATE), ("NaN", 1, DATE),
+    (True, True, DATE), (1, 2, None), (1, 2, "invalid-date"), ("abc", 2, DATE),
 ])
-def test_invalid_provider_data_returns_service_unavailable(ask, bid, date):
-    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={
-        "USDBRL": {"ask": ask, "bid": bid, "create_date": date}}))
+def test_invalid_ptax_data_returns_service_unavailable(buy, sell, date):
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={"value": [
+        {"cotacaoCompra": buy, "cotacaoVenda": sell, "dataHoraCotacao": date}]}))
     with TestClient(create_app(transport, settings=Settings())) as client:
         assert client.get("/exchanges/USD/BRL", headers=HEADERS).status_code == 503
 
 
-def test_total_provider_budget_bounds_an_inverted_lookup():
+def test_provider_timeout_bounds_a_slow_ptax():
     async def provider(request):
-        if request.url.path.endswith("BRL-USD"):
-            return httpx.Response(404)
         await asyncio.sleep(0.1)
-        return httpx.Response(200, json={})
+        return httpx.Response(200, json={"value": []})
     with TestClient(create_app(httpx.MockTransport(provider), settings=Settings(provider_timeout=0.02))) as client:
         assert client.get("/exchanges/BRL/USD", headers=HEADERS).status_code == 503
 
@@ -59,8 +56,8 @@ def test_corrupted_cache_is_replaced_without_reusing_identity():
         def expire(self, key, seconds): assert seconds == 60
         async def execute(self): pass
         async def aclose(self): pass
-    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={
-        "USDBRL": {"ask": "5.2", "bid": "5.1", "create_date": QUOTE["date"]}}))
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={"value": [
+        {"cotacaoCompra": 5.1, "cotacaoVenda": 5.2, "dataHoraCotacao": DATE}]}))
     with TestClient(create_app(transport, settings=Settings())) as client:
         client.app.state.cache = cache = Cache()
         result = client.get("/exchanges/USD/BRL", headers=HEADERS)
@@ -107,7 +104,8 @@ def test_failed_telemetry_does_not_block_later_events():
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("environment,value", [("CACHE_ENABLED", "maybe"), ("EXCHANGE_CACHE_TTL", "0"), ("EXCHANGE_PROVIDER_TIMEOUT", "NaN")])
+@pytest.mark.parametrize("environment,value", [("CACHE_ENABLED", "maybe"), ("EXCHANGE_CACHE_TTL", "0"), ("EXCHANGE_PROVIDER_TIMEOUT", "NaN"),
+                                               ("EXCHANGE_RATE_TTL", "0"), ("EXCHANGE_RATE_RETRY", "-1")])
 def test_invalid_settings_fail_early(monkeypatch, environment, value):
     monkeypatch.setenv(environment, value)
     with pytest.raises(ValueError):

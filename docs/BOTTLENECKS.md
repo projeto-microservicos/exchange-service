@@ -4,7 +4,7 @@ Referência: [Bottlenecks — Insper 2026.2](https://insper.github.io/platform/2
 
 | Área | Implementação | Ativação atual |
 |---|---|---|
-| Cache | Redis com TTL, valores sem identidade e exclusão de consultas concorrentes por par | Opcional localmente; desligado no EKS |
+| Cache | Em memória por moeda (sempre ligado: 5 min, uma chamada por moeda, cotação vencida se a PTAX falhar) e Redis opcional por par, compartilhado entre réplicas | Memória ligada em todo lugar; Redis desligado no EKS |
 | Observabilidade | Prometheus, métricas de requisições/provedor/cache/eventos e dashboard Grafana provisionado | Perfil `monitoring` local; integrar ao monitoramento existente no EKS |
 | Mensageria | Eventos `QuoteFetched` em worker assíncrono com fila limitada e confirmação do RabbitMQ | Opcional localmente; desligada no EKS |
 | Balanceamento | Service ClusterIP, probes e manifesto HPA opcional | Uma réplica no cluster atual |
@@ -12,13 +12,19 @@ Referência: [Bottlenecks — Insper 2026.2](https://insper.github.io/platform/2
 
 ## Cache e limite do provedor
 
-`CACHE_ENABLED=true` habilita Redis com `EXCHANGE_CACHE_TTL=60`. A chave `exchange:v1:{source}:{target}` contém apenas `sell`, `buy` e `date`. A identidade da conta nunca é persistida no cache. Pares inválidos, erros e taxas inválidas não são cacheados.
+**Cache em memória (sempre ligado, `app/ptax.py`).** Guarda a cotação de cada moeda em BRL por `EXCHANGE_RATE_TTL=300` s.
+- Requisições concorrentes pela mesma moeda esperam uma única chamada à PTAX: há um lock por moeda, limitado às 10 moedas.
+- Se a PTAX falhar com uma cotação vencida em memória, ela é servida (`X-Cache: stale`) por `EXCHANGE_RATE_RETRY=30` s antes de tentar de novo.
+- Sem nenhuma cotação, a resposta é 503. O serviço nunca inventa uma taxa.
+- Como são 10 moedas, 10 chamadas a cada 5 min cobrem todos os pares. A métrica `exchange_cache_requests_total{result}` conta `hit`, `miss` e `stale`, e um Redis indisponível conta `error`.
+
+**Redis (opcional).** `CACHE_ENABLED=true` habilita Redis com `EXCHANGE_CACHE_TTL=60`. A chave `exchange:v1:{source}:{target}` contém apenas `sell`, `buy` e `date`. A identidade da conta nunca é persistida no cache. Pares inválidos, erros e taxas inválidas não são cacheados.
 
 Cada processo serializa cache misses para o mesmo par e reconsulta o cache dentro do lock. Isso reduz chamadas duplicadas dentro de uma réplica; não é um lock distribuído entre réplicas. A allowlist de moedas limita o número de locks possíveis.
 
 As escritas Redis usam transação para associar cotação e TTL. Timeouts de cache são de 200 ms; falhas de conexão/leitura/escrita preservam a consulta ao provedor. Não há fallback para cotações inventadas ou cache expirado. Moedas iguais retornam a identidade matemática sem consultar dependências.
 
-O cliente HTTP reutiliza conexões, limita o pool a 20 conexões e tem um orçamento total padrão de três segundos para as tentativas direta/inversa. Não faz tentativas ilimitadas em respostas 429. O provedor pode manter seu próprio cache e impor limites: [documentação da AwesomeAPI](https://docs.awesomeapi.com.br/api-de-moedas).
+O cliente HTTP reutiliza conexões, limita o pool a 20 conexões e tem um timeout padrão de três segundos por chamada à PTAX. Não há retentativas imediatas: depois de uma falha, a próxima tentativa só acontece quando a janela de `EXCHANGE_RATE_RETRY` termina. A PTAX é um serviço público do BCB: não rode teste de carga contra ela. Documentação: [PTAX no portal de dados abertos do BCB](https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/aplicacao#!/recursos).
 
 ## Eventos de cotação
 
@@ -46,6 +52,6 @@ Cache/mensageria permanecem explicitamente desligados no Deployment, mesmo com C
 
 ## Verificação
 
-Os testes cobrem bid/ask, inversão, moedas iguais, identidade, timeout total, rate limit, dados inválidos, fallback de cache, retries e descarte de eventos. `scripts/test-infrastructure.sh` verifica cache/TTL com duas contas e confirmação de uma mensagem em Redis/RabbitMQ reais e descartáveis.
+Os testes cobrem o boletim mais recente, a taxa cruzada, moedas iguais, identidade, timeout, erros e dados inválidos da PTAX, o cache em memória (hit, uma chamada só com requisições concorrentes, stale e nova tentativa), o fallback do Redis, retries e descarte de eventos. `scripts/test-infrastructure.sh` verifica cache/TTL com duas contas e confirmação de uma mensagem em Redis/RabbitMQ reais e descartáveis.
 
 O scan deve produzir um inventário completo em `artifacts/vulnerabilities.json`; advisories e falhas de ferramenta bloqueiam o release. Esse resultado cobre bibliotecas Python, não substitui o scanning de imagem/sistema operacional nem uma avaliação de configuração da conta AWS.
