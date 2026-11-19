@@ -52,8 +52,9 @@ kind: RoleBinding
 metadata:
   name: github-actions-exchange
 subjects:
+# The EKS access entry of role github-actions-deployer maps it to this group (same as the other services).
 - kind: Group
-  name: github-actions-exchange
+  name: github-deployer
   apiGroup: rbac.authorization.k8s.io
 roleRef:
   kind: Role

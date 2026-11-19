@@ -10,11 +10,11 @@ services:
       EXCHANGE_CACHE_TTL: ${EXCHANGE_CACHE_TTL:-60}
       MESSAGING_ENABLED: ${MESSAGING_ENABLED:-false}
       RABBITMQ_URL: amqp://store:${RABBITMQ_PASSWORD:?Run python scripts/init-env.py}@exchange-rabbit:5672/
-      EXCHANGE_PROVIDER_URL: ${EXCHANGE_PROVIDER_URL:-https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/}
+      EXCHANGE_PROVIDER_URL: ${EXCHANGE_PROVIDER_URL:-https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata}
       EXCHANGE_PROVIDER_TIMEOUT: ${EXCHANGE_PROVIDER_TIMEOUT:-3}
     networks: [backend, services]
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8080/ready')"]
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8080/exchange/health-check')"]
       interval: 10s
       timeout: 5s
       retries: 20

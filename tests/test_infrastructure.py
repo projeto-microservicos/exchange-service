@@ -1,5 +1,6 @@
 """Real Redis TTL and RabbitMQ publisher confirms with disposable dependencies."""
 import asyncio
+from decimal import Decimal
 import json
 import os
 import time
@@ -19,12 +20,14 @@ pytestmark = [pytest.mark.integration, pytest.mark.skipif(
 )]
 
 
-def test_real_cache_expiry_identity_isolation_and_confirmed_event(ptax):
+def test_real_cache_expiry_identity_isolation_and_confirmed_event():
     calls = []
     def provider(request):
         calls.append(request)
-        return httpx.Response(200, json=ptax("5.2", "5.1", "2026-11-16 12:00:00"))
-    settings = Settings(cache_enabled=True, redis_url=os.environ["EXCHANGE_TEST_REDIS_URL"], cache_ttl=1,
+        return httpx.Response(200, json={"value": [
+            {"cotacaoCompra": 5.1, "cotacaoVenda": 5.2, "dataHoraCotacao": "2026-11-16 12:00:00.123"}]})
+    # Both layers expire after 1 s (Redis shared between replicas, memory per process).
+    settings = Settings(cache_enabled=True, redis_url=os.environ["EXCHANGE_TEST_REDIS_URL"], cache_ttl=1, rate_ttl=1,
                         messaging_enabled=True, rabbitmq_url=os.environ["EXCHANGE_TEST_RABBITMQ_URL"])
     with TestClient(create_app(httpx.MockTransport(provider), settings=settings)) as client:
         alice, bob = str(uuid4()), str(uuid4())
@@ -46,7 +49,7 @@ def test_real_cache_expiry_identity_isolation_and_confirmed_event(ptax):
                 async with message.process():
                     event = json.loads(message.body)
                     assert message.message_id == event["eventId"]
-                    assert event["type"] == "QuoteFetched" and event["sell"] == "5.2"
+                    assert event["type"] == "QuoteFetched" and Decimal(event["sell"]) == Decimal("5.2")
                     assert "id-account" not in event
         client.portal.call(inspect)
         time.sleep(1.1)
